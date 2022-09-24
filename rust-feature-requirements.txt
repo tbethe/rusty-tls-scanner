@@ -1,0 +1,14 @@
+For this project to work in RUST with relative ease, we need libraries for the following features:
+* Creating TLS connections
+* Choose root store used
+* Support TLS 1.0-1.3
+* Validate certificates on the fly
+
+
+  Use the openssl create, specifically the ssl module.
+
+  SslConnectorBuilder allows you to specify a custom certificate verification.
+  Allows you to set a custom X509 store.
+
+  Since this module is a binding to OpenSSL, it should have all the required features.
+  It supports TLS, choose root store, can validate certificates, even custom method.
