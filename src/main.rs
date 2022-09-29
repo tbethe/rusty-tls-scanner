@@ -2,13 +2,19 @@ mod _playground;
 mod scanner;
 
 use scanner::Domain;
+use serde::Serialize;
 
 use std::{
-    fs::read_to_string, net::Ipv4Addr, path::PathBuf, process::exit, str::FromStr, time::Duration,
+    fs::{read_to_string, write},
+    net::Ipv4Addr,
+    path::PathBuf,
+    process::{exit, Output},
+    str::FromStr,
+    time::Duration,
 };
 
 use clap::Parser;
-use log::{debug, error};
+use log::{debug, error, info};
 
 use crate::scanner::Blocklist;
 
@@ -23,9 +29,9 @@ struct Cli {
     #[clap(short, long, value_parser)]
     block_list: String,
 
-    /// Output directory
+    /// Output file
     #[clap(short, long, value_parser)]
-    output_dir: String,
+    output: String,
 
     /// Destination port
     #[clap(short, long, default_value_t = 443u16, value_parser)]
@@ -93,8 +99,20 @@ fn main() {
     });
     let blocklist: Blocklist = Blocklist::new(block_list.lines().map(|s| s.to_string()).collect());
 
-    // output directory
-    let output_path = PathBuf::from(&cli.output_dir);
+    // output file
+    let output_path = PathBuf::from(&cli.output);
+    if output_path.is_dir() {
+        error!("Output path is a directory.");
+        exit(1)
+    }
+    if output_path.exists() {
+        info!("Output file already exists and will be overwritten.");
+    }
+    let output_path_str = output_path.to_str().unwrap_or_else(|| {
+        error!("output_path is not valid utf-8");
+        exit(1);
+    });
+
     let rootstore_path = PathBuf::from(&cli.root_store);
 
     // finally construct the scanner
@@ -102,7 +120,6 @@ fn main() {
         addresses,
         blocklist,
         rootstore_path,
-        output_path,
         cli.port,
         Duration::from_secs(cli.timeout),
     )
@@ -110,7 +127,18 @@ fn main() {
         error!("Could not construct the scanner: {}", e);
         exit(1);
     });
-    scanner.start_scan();
+    let scan_results = scanner.start_scan();
 
-    //println!("{:#?}", cli);
+    let json = serde_json::to_string_pretty(&scan_results).unwrap_or_else(|e| {
+        error!("Could not serialize the results to JSON: {}", e.to_string());
+        exit(1);
+    });
+    write(output_path_str, &json).unwrap_or_else(|_| {
+        error!(
+            "Failed to write results to file '{}'. Error: {}",
+            output_path_str, &json
+        );
+        exit(1);
+    });
+    debug!("Done. Results have been written to {}", output_path_str);
 }

@@ -5,7 +5,9 @@ pub use blocklist::Blocklist;
 pub use ip_list::Domain;
 
 use ip_list::Scanlist;
-use openssl::ssl::{self, HandshakeError, SslConnector, SslMethod, SslRef};
+use openssl::ssl::{
+    self, HandshakeError, MidHandshakeSslStream, SslConnector, SslMethod, SslStream,
+};
 use serde::{Deserialize, Serialize};
 use std::net::{Ipv4Addr, SocketAddr, TcpStream};
 use std::path::PathBuf;
@@ -16,7 +18,6 @@ pub struct IpDomainPair(pub Ipv4Addr, pub Domain);
 
 pub struct Scanner {
     scanlist: Scanlist,
-    output_dir: PathBuf,
     template_connector: SslConnector,
     destination_port: u16,
     timeout: Duration,
@@ -27,7 +28,6 @@ impl Scanner {
         addresses: Vec<IpDomainPair>,
         blocklist: blocklist::Blocklist,
         rootstore: PathBuf,
-        output_dir: PathBuf,
         port: u16,
         timeout: Duration,
     ) -> Result<Self, String> {
@@ -44,7 +44,6 @@ impl Scanner {
 
         Ok(Scanner {
             scanlist: Scanlist::new(addresses, blocklist),
-            output_dir,
             template_connector,
             destination_port: port,
             timeout,
@@ -52,37 +51,79 @@ impl Scanner {
     }
 
     /// Starts the scan, consuming the scanner.
-    pub fn start_scan(self) {
+    pub fn start_scan(self) -> ConnectionInfoList {
+        let mut results: Vec<_> = Vec::new();
         for ipdomain in self.scanlist.iter() {
-            self.scan(ipdomain);
+            results.push(self.scan(ipdomain));
         }
+        ConnectionInfoList(results)
     }
 
     /// Performs the scan on the ip address in `IpDomainPair`
-    fn scan(&self, addr: &IpDomainPair) -> ScanResult {
+    fn scan(&self, addr: &IpDomainPair) -> ConnectionInfo {
         // create tcp stream
-        let stream = TcpStream::connect_timeout(
+        let stream = match TcpStream::connect_timeout(
             &SocketAddr::new(addr.0.into(), self.destination_port),
             self.timeout,
-        )
-        .unwrap();
+        ) {
+            Ok(s) => s,
+            Err(err) => return ConnectionInfo::from_tcp_stream_err(err.to_string()),
+        };
 
         let con = self.template_connector.clone();
 
         match con.connect(&addr.1.to_str(), stream) {
-            Ok(s) => {
-                println!("{:#?}", s)
-            }
+            Ok(s) => ConnectionInfo::from_tls_info(TLSConnectionInfo::from_ssl_stream(s)),
             Err(err) => {
-                println!("{:#?}", err)
+                ConnectionInfo::from_tls_info(TLSConnectionInfo::from_midhandshake_ssl_stream(err))
             }
         }
-        todo!()
     }
 }
 
-#[derive(Serialize, Deserialize)]
-struct ScanResult {
+#[derive(Serialize, Deserialize, Debug)]
+pub struct ConnectionInfoList(Vec<ConnectionInfo>);
+
+#[derive(Serialize, Deserialize, Debug)]
+struct ConnectionInfo {
+    connection_failure: bool,
+    connection_failure_reason: Option<String>,
+    tls_connection_info: Option<TLSConnectionInfo>,
+}
+
+impl ConnectionInfo {
+    fn from_tcp_stream_err(reason: String) -> Self {
+        ConnectionInfo {
+            connection_failure: true,
+            connection_failure_reason: Some(reason),
+            tls_connection_info: None,
+        }
+    }
+
+    fn from_tls_info(tls_info: TLSConnectionInfo) -> Self {
+        ConnectionInfo {
+            connection_failure: false,
+            connection_failure_reason: None,
+            tls_connection_info: Some(tls_info),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct TLSConnectionInfo {
+    domain: String,
+    ip_address: String,
     tls_version: String,
+    valid_certificate_chain: bool,
     certificate_chain: String,
+}
+
+impl TLSConnectionInfo {
+    fn from_ssl_stream(s: SslStream<TcpStream>) -> Self {
+        todo!();
+    }
+
+    fn from_midhandshake_ssl_stream(s: HandshakeError<TcpStream>) -> Self {
+        todo!();
+    }
 }
