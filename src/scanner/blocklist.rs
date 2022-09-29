@@ -96,7 +96,7 @@ mod tests {
     mod blocklist {
         use std::{net::Ipv4Addr, str::FromStr};
 
-        use crate::scanner::blocklist::Blocklist;
+        use crate::scanner::{blocklist::Blocklist, Domain};
 
         // Create blocklist from the first few lines of the blocklist given in the assignment.
         fn create_blocklist() -> Blocklist {
@@ -132,7 +132,7 @@ mod tests {
         }
 
         #[test]
-        fn correct_subnet_in_blocklist() {
+        fn test_subnet_in_blocklist() {
             let bl = create_blocklist();
             assert!(bl.is_blocked_subnet(Ipv4Addr::from_str("186.193.238.86").unwrap()));
             assert!(bl.is_blocked_subnet(Ipv4Addr::from_str("213.239.200.0").unwrap()));
@@ -141,6 +141,21 @@ mod tests {
 
             assert!(!bl.is_blocked_subnet(Ipv4Addr::from_str("186.193.238.85").unwrap()));
             assert!(!bl.is_blocked_subnet(Ipv4Addr::from_str("126.120.120.123").unwrap()));
+        }
+
+        #[test]
+        fn test_domain_in_blocklist() {
+            let bl = create_blocklist();
+            assert!(
+                bl.is_blocked_domain(&Domain::try_from("buscharter.com.au".to_owned()).unwrap())
+            );
+            assert!(
+                bl.is_blocked_domain(&Domain::try_from("boshandmurphy.com".to_owned()).unwrap())
+            );
+            assert!(bl.is_blocked_domain(&Domain::try_from("psamathe.net".to_owned()).unwrap()));
+            assert!(
+                bl.is_blocked_domain(&Domain::try_from("audioengineering.com".to_owned()).unwrap())
+            );
         }
     }
     mod subnet {

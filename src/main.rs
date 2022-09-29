@@ -1,8 +1,11 @@
+mod _playground;
 mod scanner;
 
 use scanner::Domain;
 
-use std::{fs::read_to_string, net::Ipv4Addr, path::PathBuf, process::exit, str::FromStr};
+use std::{
+    fs::read_to_string, net::Ipv4Addr, path::PathBuf, process::exit, str::FromStr, time::Duration,
+};
 
 use clap::Parser;
 use log::{debug, error};
@@ -31,6 +34,14 @@ struct Cli {
     /// Verbosity
     #[clap(short, long)]
     verbose: bool,
+
+    /// Root store to use
+    #[clap(short, long, value_parser)]
+    root_store: String,
+
+    /// Timeout for each separate connection in seconds
+    #[clap(short, long, value_parser, default_value_t = 10)]
+    timeout: u64,
 }
 
 fn main() {
@@ -84,9 +95,22 @@ fn main() {
 
     // output directory
     let output_path = PathBuf::from(&cli.output_dir);
+    let rootstore_path = PathBuf::from(&cli.root_store);
 
-    let scanner = scanner::Scanner::new(addresses, blocklist, output_path);
-    scanner.scan();
+    // finally construct the scanner
+    let scanner = scanner::Scanner::new(
+        addresses,
+        blocklist,
+        rootstore_path,
+        output_path,
+        cli.port,
+        Duration::from_secs(cli.timeout),
+    )
+    .unwrap_or_else(|e| {
+        error!("Could not construct the scanner: {}", e);
+        exit(1);
+    });
+    scanner.start_scan();
 
-    println!("{:#?}", cli);
+    //println!("{:#?}", cli);
 }

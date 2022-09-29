@@ -1,7 +1,7 @@
 use super::blocklist::Blocklist;
 use super::IpDomainPair;
 
-use std::vec::IntoIter;
+use core::slice::Iter;
 
 pub struct Scanlist {
     blocklist: Blocklist,
@@ -17,21 +17,21 @@ impl Scanlist {
         }
     }
 
-    pub fn into_iter(self) -> ScanlistIter {
+    pub fn iter(&self) -> ScanlistIter {
         ScanlistIter {
-            iter: self.addresses.into_iter(),
-            blocklist: self.blocklist,
+            iter: self.addresses.iter(),
+            blocklist: &self.blocklist,
         }
     }
 }
 
-pub struct ScanlistIter {
-    iter: IntoIter<IpDomainPair>,
-    blocklist: Blocklist,
+pub struct ScanlistIter<'sl> {
+    iter: Iter<'sl, IpDomainPair>,
+    blocklist: &'sl Blocklist,
 }
 
-impl Iterator for ScanlistIter {
-    type Item = IpDomainPair;
+impl<'sl> Iterator for ScanlistIter<'sl> {
+    type Item = &'sl IpDomainPair;
 
     fn next(&mut self) -> Option<Self::Item> {
         let mut nxt = self.iter.next()?;
@@ -60,6 +60,10 @@ impl Domain {
             }
         }
         true
+    }
+
+    pub fn to_str(&self) -> String {
+        self.parts.join(".")
     }
 }
 
