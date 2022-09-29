@@ -1,14 +1,12 @@
-mod _playground;
 mod scanner;
 
 use scanner::Domain;
-use serde::Serialize;
 
 use std::{
     fs::{read_to_string, write},
     net::Ipv4Addr,
     path::PathBuf,
-    process::{exit, Output},
+    process::exit,
     str::FromStr,
     time::Duration,
 };
