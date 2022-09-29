@@ -8,9 +8,6 @@ rust-latest:
   script:
     - cargo build --verbose
     - cargo test --verbose
-  artifacts:
-    paths:
-    - target
 
 rust-nightly:
   stage: build

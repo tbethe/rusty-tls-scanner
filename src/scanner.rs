@@ -8,6 +8,8 @@ use ip_list::Scanlist;
 use openssl::ssl::{
     self, HandshakeError, MidHandshakeSslStream, SslConnector, SslMethod, SslStream,
 };
+use openssl::stack::StackRef;
+use openssl::x509::X509;
 use serde::{Deserialize, Serialize};
 use std::net::{Ipv4Addr, SocketAddr, TcpStream};
 use std::path::PathBuf;
@@ -38,7 +40,7 @@ impl Scanner {
         // configure rootstore to use
         conn_builder
             .set_ca_file(rootstore)
-            .map_err(|e| e.to_string())?;
+            .map_err(|_| "Could not read the rootstore")?;
 
         let template_connector = conn_builder.build();
 
@@ -67,16 +69,26 @@ impl Scanner {
             self.timeout,
         ) {
             Ok(s) => s,
-            Err(err) => return ConnectionInfo::from_tcp_stream_err(err.to_string()),
+            Err(err) => return ConnectionInfo::from_tcp_stream_err(addr, err.to_string()),
         };
 
         let con = self.template_connector.clone();
 
         match con.connect(&addr.1.to_str(), stream) {
-            Ok(s) => ConnectionInfo::from_tls_info(TLSConnectionInfo::from_ssl_stream(s)),
-            Err(err) => {
-                ConnectionInfo::from_tls_info(TLSConnectionInfo::from_midhandshake_ssl_stream(err))
-            }
+            Ok(s) => ConnectionInfo::from_tls_info(addr, TLSConnectionInfo::from_ssl_stream(s)),
+            Err(err) => match err {
+                HandshakeError::SetupFailure(err_stack) => {
+                    ConnectionInfo::from_tcp_stream_err(addr, err_stack.to_string())
+                }
+                HandshakeError::Failure(midhandshake) => ConnectionInfo::from_tls_info(
+                    addr,
+                    TLSConnectionInfo::from_midhandshake_ssl_stream(midhandshake),
+                ),
+                HandshakeError::WouldBlock(midhandshake) => ConnectionInfo::from_tls_info(
+                    addr,
+                    TLSConnectionInfo::from_midhandshake_ssl_stream(midhandshake),
+                ),
+            },
         }
     }
 }
@@ -86,22 +98,32 @@ pub struct ConnectionInfoList(Vec<ConnectionInfo>);
 
 #[derive(Serialize, Deserialize, Debug)]
 struct ConnectionInfo {
+    domain: String,
+    ip_address: String,
     connection_failure: bool,
     connection_failure_reason: Option<String>,
     tls_connection_info: Option<TLSConnectionInfo>,
 }
 
 impl ConnectionInfo {
-    fn from_tcp_stream_err(reason: String) -> Self {
+    fn from_tcp_stream_err(ipdomain: &IpDomainPair, reason: String) -> Self {
+        let domain = ipdomain.1.to_str();
+        let ip_address = ipdomain.0.to_string();
         ConnectionInfo {
+            domain,
+            ip_address,
             connection_failure: true,
             connection_failure_reason: Some(reason),
             tls_connection_info: None,
         }
     }
 
-    fn from_tls_info(tls_info: TLSConnectionInfo) -> Self {
+    fn from_tls_info(ipdomain: &IpDomainPair, tls_info: TLSConnectionInfo) -> Self {
+        let domain = ipdomain.1.to_str();
+        let ip_address = ipdomain.0.to_string();
         ConnectionInfo {
+            domain,
+            ip_address,
             connection_failure: false,
             connection_failure_reason: None,
             tls_connection_info: Some(tls_info),
@@ -111,19 +133,46 @@ impl ConnectionInfo {
 
 #[derive(Serialize, Deserialize, Debug)]
 struct TLSConnectionInfo {
-    domain: String,
-    ip_address: String,
+    handshake_status: String,
+    handshake_failure_reason: Option<String>,
     tls_version: String,
-    valid_certificate_chain: bool,
-    certificate_chain: String,
+    valid_certificate_chain: String,
+    certificate_chain: Option<Vec<String>>,
 }
 
 impl TLSConnectionInfo {
     fn from_ssl_stream(s: SslStream<TcpStream>) -> Self {
-        todo!();
+        let ssl = s.ssl();
+
+        TLSConnectionInfo {
+            handshake_status: "Completed".to_string(),
+            handshake_failure_reason: None,
+            tls_version: ssl.version_str().to_string(),
+            valid_certificate_chain: ssl.verify_result().to_string(),
+            certificate_chain: Self::cert_chain_to_string(ssl.verified_chain()),
+        }
     }
 
-    fn from_midhandshake_ssl_stream(s: HandshakeError<TcpStream>) -> Self {
-        todo!();
+    fn from_midhandshake_ssl_stream(s: MidHandshakeSslStream<TcpStream>) -> Self {
+        let ssl = s.ssl();
+        TLSConnectionInfo {
+            handshake_status: "Failed".to_string(),
+            handshake_failure_reason: Some(s.error().to_string()),
+            tls_version: ssl.version_str().to_string(),
+            valid_certificate_chain: ssl.verify_result().to_string(),
+            certificate_chain: Self::cert_chain_to_string(ssl.verified_chain()),
+        }
+    }
+
+    fn cert_chain_to_string(chain: Option<&StackRef<X509>>) -> Option<Vec<String>> {
+        let mut chain_vec = Vec::new();
+
+        for cert in chain? {
+            chain_vec.push(
+                cert.to_text()
+                    .map_or("".to_string(), |b| String::from_utf8_lossy(&b).into_owned()),
+            );
+        }
+        Some(chain_vec)
     }
 }
