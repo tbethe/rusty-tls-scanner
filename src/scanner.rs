@@ -9,7 +9,7 @@ use openssl::ssl::{
     self, HandshakeError, MidHandshakeSslStream, SslConnector, SslMethod, SslStream,
 };
 use openssl::stack::StackRef;
-use openssl::x509::X509;
+use openssl::x509::{X509Ref, X509};
 use serde::{Deserialize, Serialize};
 use std::net::{Ipv4Addr, SocketAddr, TcpStream};
 use std::path::PathBuf;
@@ -137,7 +137,7 @@ struct TLSConnectionInfo {
     handshake_failure_reason: Option<String>,
     tls_version: String,
     valid_certificate_chain: String,
-    certificate_chain: Option<Vec<String>>,
+    certificate_chain: Option<CertificateChain>,
 }
 
 impl TLSConnectionInfo {
@@ -164,15 +164,57 @@ impl TLSConnectionInfo {
         }
     }
 
-    fn cert_chain_to_string(chain: Option<&StackRef<X509>>) -> Option<Vec<String>> {
+    fn cert_chain_to_string(chain: Option<&StackRef<X509>>) -> Option<CertificateChain> {
         let mut chain_vec = Vec::new();
 
         for cert in chain? {
-            chain_vec.push(
-                cert.to_text()
-                    .map_or("".to_string(), |b| String::from_utf8_lossy(&b).into_owned()),
-            );
+            chain_vec.push(Certificate::from_x509(cert));
         }
-        Some(chain_vec)
+        Some(CertificateChain { chain: chain_vec })
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct CertificateChain {
+    chain: Vec<Certificate>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct Certificate {
+    subject_name: Vec<String>,
+    issuer_name: String,
+    not_after: String,
+    not_before: String,
+    text: String,
+}
+
+impl Certificate {
+    fn from_x509(cert: &X509Ref) -> Self {
+        Certificate {
+            subject_name: cert
+                .subject_name()
+                .entries()
+                .map(|e| {
+                    e.data()
+                        .as_utf8()
+                        .map(|e| e.to_string())
+                        .unwrap_or_else(|_| "".to_string())
+                })
+                .collect(),
+            issuer_name: cert
+                .issuer_name()
+                .entries()
+                .map(|e| {
+                    e.data()
+                        .as_utf8()
+                        .map(|e| e.to_string())
+                        .unwrap_or_else(|_| "".to_string())
+                })
+                .collect(),
+            not_after: cert.not_after().to_string(),
+            not_before: cert.not_before().to_string(),
+            text: String::from_utf8_lossy(&cert.to_text().unwrap_or_else(|_| Vec::new()))
+                .to_string(),
+        }
     }
 }
