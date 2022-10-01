@@ -3,12 +3,7 @@ mod scanner;
 use scanner::Domain;
 
 use std::{
-    fs::{read_to_string, write},
-    net::Ipv4Addr,
-    path::PathBuf,
-    process::exit,
-    str::FromStr,
-    time::Duration,
+    fs::read_to_string, net::Ipv4Addr, path::PathBuf, process::exit, str::FromStr, time::Duration,
 };
 
 use clap::Parser;
@@ -106,10 +101,6 @@ fn main() {
     if output_path.exists() {
         info!("Output file already exists and will be overwritten.");
     }
-    let output_path_str = output_path.to_str().unwrap_or_else(|| {
-        error!("output_path is not valid utf-8");
-        exit(1);
-    });
 
     let rootstore_path = PathBuf::from(&cli.root_store);
 
@@ -118,6 +109,7 @@ fn main() {
     let scanner = scanner::Scanner::new(
         addresses,
         blocklist,
+        output_path,
         rootstore_path,
         cli.port,
         Duration::from_secs(cli.timeout),
@@ -128,20 +120,5 @@ fn main() {
         exit(1);
     });
     info!("Starting the scan.");
-    let scan_results = scanner.start_scan();
-
-    debug!("Converting results to JSON.");
-    let json = serde_json::to_string_pretty(&scan_results).unwrap_or_else(|e| {
-        error!("Could not serialize the results to JSON: {}", e.to_string());
-        exit(1);
-    });
-    debug!("Writing JSON to file");
-    write(output_path_str, &json).unwrap_or_else(|_| {
-        error!(
-            "Failed to write results to file '{}'. Error: {}",
-            output_path_str, &json
-        );
-        exit(1);
-    });
-    debug!("Done. Results have been written to {}", output_path_str);
+    scanner.start_scan();
 }

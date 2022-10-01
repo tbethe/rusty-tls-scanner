@@ -12,6 +12,8 @@ use openssl::ssl::{
 use openssl::stack::StackRef;
 use openssl::x509::{X509Ref, X509};
 use serde::{Deserialize, Serialize};
+use std::fs::File;
+use std::io::Write;
 use std::net::{Ipv4Addr, SocketAddr, TcpStream};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -24,6 +26,7 @@ pub struct IpDomainPair(pub Ipv4Addr, pub Domain);
 pub struct Scanner {
     scanlist: Scanlist,
     template_connector: SslConnector,
+    output_path: PathBuf,
     destination_port: u16,
     timeout: Duration,
     threads: u64,
@@ -33,6 +36,7 @@ impl Scanner {
     pub fn new(
         addresses: Vec<IpDomainPair>,
         blocklist: blocklist::Blocklist,
+        output_path: PathBuf,
         rootstore: PathBuf,
         port: u16,
         timeout: Duration,
@@ -52,6 +56,7 @@ impl Scanner {
         Ok(Scanner {
             scanlist: Scanlist::new(addresses, blocklist),
             template_connector,
+            output_path,
             destination_port: port,
             timeout,
             threads,
@@ -59,17 +64,21 @@ impl Scanner {
     }
 
     /// Starts the scan, consuming the scanner.
-    pub fn start_scan(self) -> ConnectionInfoList {
+    pub fn start_scan(self) {
+        // scan list for all thread to pull the next ip from
         let scan_list = Arc::new(Mutex::new(self.scanlist));
-        let results = Arc::new(Mutex::new(Vec::new()));
+        // collection channel to put the gathered tls info into
+        let (res_sender, res_receiver) = std::sync::mpsc::channel();
 
         let mut handles = Vec::new();
         for n in 0..self.threads {
             let timeout = self.timeout;
             let port = self.destination_port;
             let sl = Arc::clone(&scan_list);
-            let res = Arc::clone(&results);
+            let res = res_sender.clone();
             let con = self.template_connector.clone();
+
+            // spawn producers that perform the scan;
             handles.push(thread::spawn(move || {
                 debug!("Started thread {}.", n);
                 loop {
@@ -86,17 +95,56 @@ impl Scanner {
 
                     let connector = con.clone();
                     let tls_info = Scanner::scan(&ipdomain, port, connector, timeout);
-                    res.lock().unwrap().push(tls_info);
+
+                    res.send(tls_info);
                 }
             }));
         }
+
+        // spawn the consumer that writes to file.
+        let still_producing = Arc::new(Mutex::new(true));
+        let still_producing_t = still_producing.clone();
+        let consumer_handle = thread::spawn(move || {
+            let mut out = File::create(self.output_path).unwrap();
+            // open the JSON array
+            out.write(b"[\n");
+            let mut first = true;
+            while *still_producing_t.lock().unwrap() {
+                // if we cannot receive something
+                // (for instance because the channel is empty)
+                // just continue the loop and try again
+                let tls_info = match res_receiver.try_recv() {
+                    Ok(a) => a,
+                    Err(_) => continue,
+                };
+
+                // except for the first entry, prepend the comma to satisfy JSON format
+                if !first {
+                    out.write(b",\n");
+                } else {
+                    first = false;
+                }
+                // convert to JSON
+                let json = serde_json::to_string_pretty(&tls_info).unwrap();
+                debug!("Json: {}", &json);
+                if let Ok(a) = dbg!(out.write(&json.into_bytes())) {
+                    debug!("Bytes written :{}", a);
+                }
+            }
+            // close the JSON array
+            out.write(b"]");
+        });
 
         for (n, h) in handles.into_iter().enumerate() {
             debug!("Thread {} finished", n);
             h.join().unwrap();
         }
+        // Make sure the guard is dropped immediately
+        {
+            *still_producing.lock().unwrap() = false;
+        }
+        consumer_handle.join().unwrap();
         debug!("Scan completed.");
-        ConnectionInfoList(Arc::try_unwrap(results).unwrap().into_inner().unwrap())
     }
 
     /// Performs the scan on the ip address in `IpDomainPair`
@@ -131,6 +179,10 @@ impl Scanner {
         }
     }
 }
+
+//
+// Objects to facilitate serializing the TLS info
+//
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ConnectionInfoList(Vec<ConnectionInfo>);
