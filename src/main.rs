@@ -46,6 +46,10 @@ struct Cli {
     /// Timeout for each separate connection in seconds
     #[clap(short, long, value_parser, default_value_t = 10)]
     timeout: u64,
+
+    /// Number of threads to use
+    #[clap(long, value_parser, default_value_t = 1)]
+    threads: u64,
 }
 
 fn main() {
@@ -57,10 +61,6 @@ fn main() {
         log_builder.filter_level(log::LevelFilter::Debug);
     }
     log_builder.init();
-
-    // warning examples.
-    //error!("This is an error");
-    //debug!("This is a debug statement");
 
     // read and parse ip addresses to be scanned
     let path = PathBuf::from(&cli.ip_list);
@@ -120,6 +120,7 @@ fn main() {
         rootstore_path,
         cli.port,
         Duration::from_secs(cli.timeout),
+        cli.threads,
     )
     .unwrap_or_else(|e| {
         error!("Could not construct the scanner: {}", e);

@@ -5,6 +5,7 @@ pub use blocklist::Blocklist;
 pub use ip_list::Domain;
 
 use ip_list::Scanlist;
+use log::debug;
 use openssl::ssl::{
     self, HandshakeError, MidHandshakeSslStream, SslConnector, SslMethod, SslStream,
 };
@@ -13,6 +14,8 @@ use openssl::x509::{X509Ref, X509};
 use serde::{Deserialize, Serialize};
 use std::net::{Ipv4Addr, SocketAddr, TcpStream};
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex, MutexGuard};
+use std::thread;
 use std::time::Duration;
 
 #[derive(Debug)]
@@ -23,6 +26,7 @@ pub struct Scanner {
     template_connector: SslConnector,
     destination_port: u16,
     timeout: Duration,
+    threads: u64,
 }
 
 impl Scanner {
@@ -32,6 +36,7 @@ impl Scanner {
         rootstore: PathBuf,
         port: u16,
         timeout: Duration,
+        threads: u64,
     ) -> Result<Self, String> {
         // Build the ssl connector that will serve as a template.
         let mut conn_builder: ssl::SslConnectorBuilder =
@@ -49,32 +54,62 @@ impl Scanner {
             template_connector,
             destination_port: port,
             timeout,
+            threads,
         })
     }
 
     /// Starts the scan, consuming the scanner.
     pub fn start_scan(self) -> ConnectionInfoList {
-        let mut results: Vec<_> = Vec::new();
-        for ipdomain in self.scanlist.iter() {
-            results.push(self.scan(ipdomain));
+        let scan_list = Arc::new(Mutex::new(self.scanlist));
+        let results = Arc::new(Mutex::new(Vec::new()));
+
+        let mut handles = Vec::new();
+        for n in 0..self.threads {
+            let timeout = self.timeout;
+            let port = self.destination_port;
+            let sl = Arc::clone(&scan_list);
+            let res = Arc::clone(&results);
+            let con = self.template_connector.clone();
+            handles.push(thread::spawn(move || {
+                debug!("Started thread {}", n);
+                loop {
+                    let mut guard = sl.lock().unwrap();
+                    let ipdomain = match guard.next() {
+                        Some(a) => a,
+                        None => break,
+                    };
+                    // let go of the lock.
+                    std::mem::drop(guard);
+
+                    debug!("[Thread {}] Scanning {:?}", n, ipdomain);
+                    let connector = con.clone();
+                    let tls_info = Scanner::scan(&ipdomain, port, connector, timeout);
+                    res.lock().unwrap().push(tls_info);
+                }
+            }));
         }
-        ConnectionInfoList(results)
+
+        for h in handles {
+            h.join().unwrap();
+        }
+        ConnectionInfoList(Arc::try_unwrap(results).unwrap().into_inner().unwrap())
     }
 
     /// Performs the scan on the ip address in `IpDomainPair`
-    fn scan(&self, addr: &IpDomainPair) -> ConnectionInfo {
+    fn scan(
+        addr: &IpDomainPair,
+        port: u16,
+        connector: SslConnector,
+        timeout: Duration,
+    ) -> ConnectionInfo {
         // create tcp stream
-        let stream = match TcpStream::connect_timeout(
-            &SocketAddr::new(addr.0.into(), self.destination_port),
-            self.timeout,
-        ) {
-            Ok(s) => s,
-            Err(err) => return ConnectionInfo::from_tcp_stream_err(addr, err.to_string()),
-        };
+        let stream =
+            match TcpStream::connect_timeout(&SocketAddr::new(addr.0.into(), port), timeout) {
+                Ok(s) => s,
+                Err(err) => return ConnectionInfo::from_tcp_stream_err(addr, err.to_string()),
+            };
 
-        let con = self.template_connector.clone();
-
-        match con.connect(&addr.1.to_str(), stream) {
+        match connector.connect(&addr.1.to_str(), stream) {
             Ok(s) => ConnectionInfo::from_tls_info(addr, TLSConnectionInfo::from_ssl_stream(s)),
             Err(err) => match err {
                 HandshakeError::SetupFailure(err_stack) => {
