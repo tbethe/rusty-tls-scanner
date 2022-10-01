@@ -114,6 +114,7 @@ fn main() {
     let rootstore_path = PathBuf::from(&cli.root_store);
 
     // finally construct the scanner
+    debug!("Constructing the scanner.");
     let scanner = scanner::Scanner::new(
         addresses,
         blocklist,
@@ -126,12 +127,15 @@ fn main() {
         error!("Could not construct the scanner: {}", e);
         exit(1);
     });
+    info!("Starting the scan.");
     let scan_results = scanner.start_scan();
 
+    debug!("Converting results to JSON.");
     let json = serde_json::to_string_pretty(&scan_results).unwrap_or_else(|e| {
         error!("Could not serialize the results to JSON: {}", e.to_string());
         exit(1);
     });
+    debug!("Writing JSON to file");
     write(output_path_str, &json).unwrap_or_else(|_| {
         error!(
             "Failed to write results to file '{}'. Error: {}",

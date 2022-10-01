@@ -14,7 +14,7 @@ use openssl::x509::{X509Ref, X509};
 use serde::{Deserialize, Serialize};
 use std::net::{Ipv4Addr, SocketAddr, TcpStream};
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
@@ -71,17 +71,19 @@ impl Scanner {
             let res = Arc::clone(&results);
             let con = self.template_connector.clone();
             handles.push(thread::spawn(move || {
-                debug!("Started thread {}", n);
+                debug!("Started thread {}.", n);
                 loop {
                     let mut guard = sl.lock().unwrap();
                     let ipdomain = match guard.next() {
                         Some(a) => a,
-                        None => break,
+                        None => {
+                            debug!("Thread {} finished.", n);
+                            break;
+                        }
                     };
                     // let go of the lock.
                     std::mem::drop(guard);
 
-                    debug!("[Thread {}] Scanning {:?}", n, ipdomain);
                     let connector = con.clone();
                     let tls_info = Scanner::scan(&ipdomain, port, connector, timeout);
                     res.lock().unwrap().push(tls_info);
@@ -89,9 +91,11 @@ impl Scanner {
             }));
         }
 
-        for h in handles {
+        for (n, h) in handles.into_iter().enumerate() {
+            debug!("Thread {} finished", n);
             h.join().unwrap();
         }
+        debug!("Scan completed.");
         ConnectionInfoList(Arc::try_unwrap(results).unwrap().into_inner().unwrap())
     }
 
