@@ -10,7 +10,7 @@ at the University of Twente.
 * Rust toolchain (recommended to install via `rustup`).
 * OpenSSL
 
-* Cargo, Rust's package manager, will take care of all the rust dependencies.
+* Cargo (installed by `rustup`) is Rust's package manager. Cargo will take care of all the rust dependencies.
 
 ### How to build
 Simply run `cargo build --release` and find the binary in the `/target` directory
