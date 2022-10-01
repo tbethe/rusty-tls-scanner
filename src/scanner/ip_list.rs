@@ -1,42 +1,32 @@
 use super::blocklist::Blocklist;
 use super::IpDomainPair;
 
-use core::slice::Iter;
+use log::debug;
+use std::vec::IntoIter;
 
 pub struct Scanlist {
     blocklist: Blocklist,
     // ipv4 address, domain
-    addresses: Vec<IpDomainPair>,
+    addresses: IntoIter<IpDomainPair>,
 }
 
 impl Scanlist {
     pub fn new(addresses: Vec<IpDomainPair>, blocklist: Blocklist) -> Self {
         Scanlist {
             blocklist,
-            addresses,
-        }
-    }
-
-    pub fn iter(&self) -> ScanlistIter {
-        ScanlistIter {
-            iter: self.addresses.iter(),
-            blocklist: &self.blocklist,
+            addresses: addresses.into_iter(),
         }
     }
 }
 
-pub struct ScanlistIter<'sl> {
-    iter: Iter<'sl, IpDomainPair>,
-    blocklist: &'sl Blocklist,
-}
-
-impl<'sl> Iterator for ScanlistIter<'sl> {
-    type Item = &'sl IpDomainPair;
+impl Iterator for Scanlist {
+    type Item = IpDomainPair;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let mut nxt = self.iter.next()?;
+        let mut nxt = self.addresses.next()?;
         while self.blocklist.is_blocked_subnet(nxt.0) || self.blocklist.is_blocked_domain(&nxt.1) {
-            nxt = self.iter.next()?;
+            debug!("Blocked: {} - {}", nxt.0, nxt.1.to_str());
+            nxt = self.addresses.next()?;
         }
         Some(nxt)
     }

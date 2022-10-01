@@ -3,12 +3,7 @@ mod scanner;
 use scanner::Domain;
 
 use std::{
-    fs::{read_to_string, write},
-    net::Ipv4Addr,
-    path::PathBuf,
-    process::exit,
-    str::FromStr,
-    time::Duration,
+    fs::read_to_string, net::Ipv4Addr, path::PathBuf, process::exit, str::FromStr, time::Duration,
 };
 
 use clap::Parser;
@@ -46,6 +41,10 @@ struct Cli {
     /// Timeout for each separate connection in seconds
     #[clap(short, long, value_parser, default_value_t = 10)]
     timeout: u64,
+
+    /// Number of threads to use
+    #[clap(long, value_parser, default_value_t = 1)]
+    threads: u64,
 }
 
 fn main() {
@@ -57,10 +56,6 @@ fn main() {
         log_builder.filter_level(log::LevelFilter::Debug);
     }
     log_builder.init();
-
-    // warning examples.
-    //error!("This is an error");
-    //debug!("This is a debug statement");
 
     // read and parse ip addresses to be scanned
     let path = PathBuf::from(&cli.ip_list);
@@ -106,37 +101,24 @@ fn main() {
     if output_path.exists() {
         info!("Output file already exists and will be overwritten.");
     }
-    let output_path_str = output_path.to_str().unwrap_or_else(|| {
-        error!("output_path is not valid utf-8");
-        exit(1);
-    });
 
     let rootstore_path = PathBuf::from(&cli.root_store);
 
     // finally construct the scanner
+    debug!("Constructing the scanner.");
     let scanner = scanner::Scanner::new(
         addresses,
         blocklist,
+        output_path,
         rootstore_path,
         cli.port,
         Duration::from_secs(cli.timeout),
+        cli.threads,
     )
     .unwrap_or_else(|e| {
         error!("Could not construct the scanner: {}", e);
         exit(1);
     });
-    let scan_results = scanner.start_scan();
-
-    let json = serde_json::to_string_pretty(&scan_results).unwrap_or_else(|e| {
-        error!("Could not serialize the results to JSON: {}", e.to_string());
-        exit(1);
-    });
-    write(output_path_str, &json).unwrap_or_else(|_| {
-        error!(
-            "Failed to write results to file '{}'. Error: {}",
-            output_path_str, &json
-        );
-        exit(1);
-    });
-    debug!("Done. Results have been written to {}", output_path_str);
+    info!("Starting the scan.");
+    scanner.start_scan();
 }
