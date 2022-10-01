@@ -1,3 +1,30 @@
+//!# TLS Scanner written in Rust
+//!
+//!## Description
+//!TLS Scanner written in Rust for the course Empirical Security Analysis & Engineering (2022/2023)
+//!at the University of Twente.
+//!
+//!## Building
+//!### Dependecies
+//!
+//!* Rust toolchain (recommended to install `rustup`).
+//!* OpenSSL
+//!
+//!* Cargo, Rust's package manager, will take care of all the rust dependencies.
+//!
+//!### How to build
+//!Simply run `cargo build --release` and find the binary in the `/target` directory
+//! or run `cargo build --release -- <arguments>`.
+//!
+//!## Usage
+//! Mandatory option:
+//! * `--ip-list`: csv file with a domain corresponding IP pair on each line: `<domain>,<ipv4>`
+//! * `--block-list`: list of ipv4 addresses or domains that will not be scanned.
+//! * `--root-store`: x509 root store to use.
+//! * `--output`: output file to store the results in.
+//!
+//! Run with `--help` to see all options.
+
 mod scanner;
 
 use scanner::Domain;
@@ -11,18 +38,24 @@ use log::{debug, error, info};
 
 use crate::scanner::Blocklist;
 
+/// TLS scanner for Emprical Security Analysis & Engineering implemented in Rust.
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
 struct Cli {
-    /// List of IPv4 addresses to be scanned
+    /// List of IPv4 addresses to be scanned.
+    ///
+    /// The file should have one domain/ipv4 address pair per line in the following format: "<domain>,<ipv4>".
     #[clap(short, long, value_parser)]
     ip_list: String,
 
-    /// Use a different block list
+    /// Block list to use.
+    ///
+    /// Domains and ipv4 addresses in this file will not be scanned.
+    /// The file should have one ipv4 address or domain per line.
     #[clap(short, long, value_parser)]
     block_list: String,
 
-    /// Output file
+    /// Output file to write the results to in JSON.
     #[clap(short, long, value_parser)]
     output: String,
 
@@ -30,23 +63,25 @@ struct Cli {
     #[clap(short, long, default_value_t = 443u16, value_parser)]
     port: u16,
 
-    /// Verbosity
+    /// Print debug information.
     #[clap(short, long)]
     verbose: bool,
 
-    /// Root store to use
+    /// X509 Root store to use.
     #[clap(short, long, value_parser)]
     root_store: String,
 
-    /// Timeout for each separate connection in seconds
+    /// Timeout for each connection in seconds.
     #[clap(short, long, value_parser, default_value_t = 10)]
     timeout: u64,
 
-    /// Number of threads to use
+    /// Number of threads to use to perform the scan.
     #[clap(long, value_parser, default_value_t = 1)]
     threads: u64,
 }
 
+/// Main function that creates the commandline interface and constructs
+/// and runs the scanner.
 fn main() {
     let cli = Cli::parse();
 
@@ -92,12 +127,13 @@ fn main() {
     });
     let blocklist: Blocklist = Blocklist::new(block_list.lines().map(|s| s.to_string()).collect());
 
-    // output file
+    // check that the output file is not a directory
     let output_path = PathBuf::from(&cli.output);
     if output_path.is_dir() {
         error!("Output path is a directory.");
         exit(1)
     }
+    // notify the user if the file already exists
     if output_path.exists() {
         info!("Output file already exists and will be overwritten.");
     }
@@ -121,4 +157,5 @@ fn main() {
     });
     info!("Starting the scan.");
     scanner.start_scan();
+    info!("Successfully completed the scan.");
 }

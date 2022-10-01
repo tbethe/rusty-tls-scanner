@@ -1,3 +1,7 @@
+//! Module responsible for performing the actual scan
+//!
+//! The struct [Scanner] does the heavy lifting.
+
 mod blocklist;
 mod ip_list;
 
@@ -20,11 +24,16 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
+/// Abstraction over a pair of an IPv4 address and a domain,
+/// just like we expect a line of the input file to look like.
 #[derive(Debug)]
 pub struct IpDomainPair(pub Ipv4Addr, pub Domain);
 
+/// TLS Scanner that actually performs the scan.
 pub struct Scanner {
     scanlist: Scanlist,
+    /// This connector will be configured once when the scanner is initialized and will serve as a
+    /// template for all the TLS connections that the this scanner will create.
     template_connector: SslConnector,
     output_path: PathBuf,
     destination_port: u16,
@@ -33,6 +42,10 @@ pub struct Scanner {
 }
 
 impl Scanner {
+    /// Constructs a new scanner.
+    ///
+    /// # Error
+    /// Returns `Err(String)` if something went wrong loading the x509 root store.
     pub fn new(
         addresses: Vec<IpDomainPair>,
         blocklist: blocklist::Blocklist,
@@ -64,12 +77,15 @@ impl Scanner {
     }
 
     /// Starts the scan, consuming the scanner.
+    ///
+    /// The scan results will be written to a file indicated by `self.output_path`.
     pub fn start_scan(self) {
         // scan list for all thread to pull the next ip from
         let scan_list = Arc::new(Mutex::new(self.scanlist));
         // collection channel to put the gathered tls info into
         let (res_sender, res_receiver) = std::sync::mpsc::channel();
 
+        // spawn the producers, a.k.a. the threads that will perform the scans.
         let mut handles = Vec::new();
         for _ in 0..self.threads {
             let timeout = self.timeout;
@@ -78,7 +94,6 @@ impl Scanner {
             let res = res_sender.clone();
             let con = self.template_connector.clone();
 
-            // spawn producers that perform the scan;
             handles.push(thread::spawn(move || {
                 loop {
                     let mut guard = sl.lock().unwrap();
@@ -88,7 +103,7 @@ impl Scanner {
                             break;
                         }
                     };
-                    // let go of the lock.
+                    // let go of the lock as soon as possible.
                     std::mem::drop(guard);
 
                     let connector = con.clone();
@@ -107,13 +122,21 @@ impl Scanner {
             // open the JSON array
             out.write(b"[\n");
             let mut first = true;
-            while *still_producing_t.lock().unwrap() {
-                // if we cannot receive something
-                // (for instance because the channel is empty)
-                // just continue the loop and try again
+            loop {
                 let tls_info = match res_receiver.try_recv() {
                     Ok(a) => a,
-                    Err(_) => continue,
+                    Err(_) => {
+                        // error means the channel was empty
+                        // if the channel is empty, but we are still producing,
+                        // continue the loop
+                        // otherwise, we are done and no new entries will appear,
+                        // so we break
+                        if *still_producing_t.lock().unwrap() {
+                            continue;
+                        } else {
+                            break;
+                        }
+                    }
                 };
 
                 // except for the first entry, prepend the comma to satisfy JSON format
@@ -130,12 +153,14 @@ impl Scanner {
             out.write(b"]");
         });
 
+        // wait for all the producer threads to finish
         for (n, h) in handles.into_iter().enumerate() {
             h.join().unwrap();
             debug!("Thread {} finished", n);
         }
         debug!("All producer threads finished.");
-        // Make sure the guard is dropped immediately
+        // Make sure the guard is dropped immediately so the producer thread
+        // can acquire the lock
         {
             *still_producing.lock().unwrap() = false;
         }
@@ -163,7 +188,7 @@ impl Scanner {
             .set_read_timeout(Some(timeout))
             .expect("Duration cannot be 0");
 
-        match connector.connect(&addr.1.to_str(), stream) {
+        match connector.connect(&addr.1.to_string(), stream) {
             Ok(s) => ConnectionInfo::from_tls_info(addr, TLSConnectionInfo::from_ssl_stream(s)),
             Err(err) => match err {
                 HandshakeError::SetupFailure(err_stack) => {
@@ -186,9 +211,7 @@ impl Scanner {
 // Objects to facilitate serializing the TLS info
 //
 
-#[derive(Serialize, Deserialize, Debug)]
-pub struct ConnectionInfoList(Vec<ConnectionInfo>);
-
+/// Struct that represents the result of scanning 1 ip/domain.
 #[derive(Serialize, Deserialize, Debug)]
 struct ConnectionInfo {
     domain: String,
@@ -199,8 +222,10 @@ struct ConnectionInfo {
 }
 
 impl ConnectionInfo {
+    /// Creates a `ConnectionInfo` from when the TCP stream errored, most likely
+    /// because of a connection timeout
     fn from_tcp_stream_err(ipdomain: &IpDomainPair, reason: String) -> Self {
-        let domain = ipdomain.1.to_str();
+        let domain = ipdomain.1.to_string();
         let ip_address = ipdomain.0.to_string();
         ConnectionInfo {
             domain,
@@ -211,8 +236,9 @@ impl ConnectionInfo {
         }
     }
 
+    /// Creates a `ConnectionInfo` with `tls_info`, meaning a handshake was at least attempted.
     fn from_tls_info(ipdomain: &IpDomainPair, tls_info: TLSConnectionInfo) -> Self {
-        let domain = ipdomain.1.to_str();
+        let domain = ipdomain.1.to_string();
         let ip_address = ipdomain.0.to_string();
         ConnectionInfo {
             domain,
@@ -224,6 +250,7 @@ impl ConnectionInfo {
     }
 }
 
+/// Serializable info about the TLS connection
 #[derive(Serialize, Deserialize, Debug)]
 struct TLSConnectionInfo {
     handshake_status: String,
@@ -234,6 +261,7 @@ struct TLSConnectionInfo {
 }
 
 impl TLSConnectionInfo {
+    /// Extracts info from the [`SslStream`] to create the [`TLSConnectionInfo`].
     fn from_ssl_stream(s: SslStream<TcpStream>) -> Self {
         let ssl = s.ssl();
 
@@ -242,10 +270,11 @@ impl TLSConnectionInfo {
             handshake_failure_reason: None,
             tls_version: ssl.version_str().to_string(),
             valid_certificate_chain: ssl.verify_result().to_string(),
-            certificate_chain: Self::cert_chain_to_string(ssl.verified_chain()),
+            certificate_chain: Self::certificatechain_from_x509_stack(ssl.verified_chain()),
         }
     }
 
+    /// Extracts info from the [`MidHandshakeSslStream`] to create the [`TLSConnectionInfo`].
     fn from_midhandshake_ssl_stream(s: MidHandshakeSslStream<TcpStream>) -> Self {
         let ssl = s.ssl();
         TLSConnectionInfo {
@@ -253,11 +282,14 @@ impl TLSConnectionInfo {
             handshake_failure_reason: Some(s.error().to_string()),
             tls_version: ssl.version_str().to_string(),
             valid_certificate_chain: ssl.verify_result().to_string(),
-            certificate_chain: Self::cert_chain_to_string(ssl.verified_chain()),
+            certificate_chain: Self::certificatechain_from_x509_stack(ssl.verified_chain()),
         }
     }
 
-    fn cert_chain_to_string(chain: Option<&StackRef<X509>>) -> Option<CertificateChain> {
+    /// Helper function to create a [`CertificateChain`], an object we can serialize, from the OpenSSL objects.
+    fn certificatechain_from_x509_stack(
+        chain: Option<&StackRef<X509>>,
+    ) -> Option<CertificateChain> {
         let mut chain_vec = Vec::new();
 
         for cert in chain? {
@@ -267,11 +299,14 @@ impl TLSConnectionInfo {
     }
 }
 
+/// Chain of X509 Certificates.
+/// The last cert in the chain is the root cert.
 #[derive(Serialize, Deserialize, Debug)]
 struct CertificateChain {
     chain: Vec<Certificate>,
 }
 
+/// Serializable version of an OpenSSL X509 Certificate.
 #[derive(Serialize, Deserialize, Debug)]
 struct Certificate {
     subject_name: Vec<String>,

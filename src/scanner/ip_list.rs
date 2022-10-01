@@ -1,9 +1,14 @@
+//! Scan list. Combination of a list of [`IpDomainPair`]s and a blocklist, implementing an Iterator
+//! such that only non-blocked pairs are returned.
+
 use super::blocklist::Blocklist;
 use super::IpDomainPair;
 
 use log::debug;
 use std::vec::IntoIter;
 
+/// Scan list. Combination of a list of [`IpDomainPair`]s and a blocklist, implementing an Iterator
+/// such that only non-blocked pairs are returned.
 pub struct Scanlist {
     blocklist: Blocklist,
     // ipv4 address, domain
@@ -11,6 +16,7 @@ pub struct Scanlist {
 }
 
 impl Scanlist {
+    /// Constructsa new scan list from a blocklist and [`IpDomainPair`]s.
     pub fn new(addresses: Vec<IpDomainPair>, blocklist: Blocklist) -> Self {
         Scanlist {
             blocklist,
@@ -25,7 +31,7 @@ impl Iterator for Scanlist {
     fn next(&mut self) -> Option<Self::Item> {
         let mut nxt = self.addresses.next()?;
         while self.blocklist.is_blocked_subnet(nxt.0) || self.blocklist.is_blocked_domain(&nxt.1) {
-            debug!("Blocked: {} - {}", nxt.0, nxt.1.to_str());
+            debug!("Blocked: {} - {}", nxt.0, nxt.1.to_string());
             nxt = self.addresses.next()?;
         }
         Some(nxt)
@@ -38,7 +44,7 @@ pub struct Domain {
 }
 
 impl Domain {
-    // Checks if `self` is a subdomain of `other`.
+    /// Checks if `self` is a subdomain of `other`.
     pub fn is_subdomain(&self, other: &Self) -> bool {
         // if the subdomain has less parts, it cannot be a subdomain
         if self.parts.len() < other.parts.len() {
@@ -52,7 +58,8 @@ impl Domain {
         true
     }
 
-    pub fn to_str(&self) -> String {
+    /// Convert the domain to a String. Could be implemented with the Trait, but I was lazy.
+    pub fn to_string(&self) -> String {
         self.parts.join(".")
     }
 }

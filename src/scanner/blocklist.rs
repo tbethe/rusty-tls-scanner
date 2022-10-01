@@ -1,15 +1,30 @@
+//! Implementation of the blocklist in [`Blocklist`]
+//!
+//! This blocklist is a list of IPv4 addresses and domains which should be blocked.
+//! This enables you to check if a given address or domain is blocked.
+//!
+//! Subdomains of a blocked domain are also blocked.
+
 use log::debug;
 use std::{net::Ipv4Addr, str::FromStr};
 
 use super::Domain;
 
+/// This blocklist is a list of IPv4 addresses and domains which should be blocked.
+/// This enables you to check if a given address or domain is blocked.
+///
+/// Subdomains of a blocked domain are also blocked.
 pub struct Blocklist {
     domains: Vec<Domain>,
     subnets: Vec<Subnet>,
 }
 
 impl Blocklist {
-    // Assumes that strings with '/' inside are subnets, other strings are domains.
+    /// Creates a blocklist of a list of strings. The strings can be domains and IPv4 addresses
+    /// interspersed. This implementation simply assumes that strings with '/' inside are subnets, other strings are domains.
+    /// Creation of the blocklist always succeeds. Bad strings (invalid IPv4 addresses or invalid
+    /// domains) are simply excluded from the list. However, a debug message is sent whenever a
+    /// string could not be parsed.
     pub fn new(block_list: Vec<String>) -> Self {
         let mut domains = Vec::new();
         let mut subnets = Vec::new();
@@ -18,7 +33,6 @@ impl Blocklist {
                 // subnet
                 match Subnet::try_from(s.to_owned()) {
                     Ok(subnet) => subnets.push(subnet),
-                    // library functions shouldn't use loggers TODO
                     Err(err) => debug!("Failed to add {} during blocklist creation: {}", s, err),
                 }
             } else {
@@ -33,6 +47,7 @@ impl Blocklist {
         Blocklist { domains, subnets }
     }
 
+    /// Checks if `ip` is blocked by this blocklist.
     pub fn is_blocked_subnet(&self, ip: Ipv4Addr) -> bool {
         for subnet in &self.subnets {
             if subnet.ip_in_subnet(ip) {
@@ -42,9 +57,13 @@ impl Blocklist {
         false
     }
 
-    pub fn is_blocked_domain(&self, subdomain: &Domain) -> bool {
-        for domain in &self.domains {
-            if domain.is_subdomain(subdomain) {
+    /// Checks if `domain` is blocked by this blocklist.
+    ///
+    /// If `domain` is a _subdomain_ of a domain in the blocklist, `domain` will still be bocked,
+    /// i.e., this function will return `true`.
+    pub fn is_blocked_domain(&self, domain: &Domain) -> bool {
+        for domain_s in &self.domains {
+            if domain_s.is_subdomain(domain) {
                 return true;
             }
         }
@@ -59,6 +78,8 @@ struct Subnet {
 }
 
 impl Subnet {
+    /// Checks if `ip` is in the subnet that `Self` represents.
+    /// Returns `true` if `ip` belongs to `Self`s subnet, `false` otherwise.
     fn ip_in_subnet(&self, ip: Ipv4Addr) -> bool {
         let _ip: u32 = ip.into();
         _ip & self.mask == self.ip & self.mask
