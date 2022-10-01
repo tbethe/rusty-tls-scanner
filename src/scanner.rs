@@ -71,7 +71,7 @@ impl Scanner {
         let (res_sender, res_receiver) = std::sync::mpsc::channel();
 
         let mut handles = Vec::new();
-        for n in 0..self.threads {
+        for _ in 0..self.threads {
             let timeout = self.timeout;
             let port = self.destination_port;
             let sl = Arc::clone(&scan_list);
@@ -80,13 +80,11 @@ impl Scanner {
 
             // spawn producers that perform the scan;
             handles.push(thread::spawn(move || {
-                debug!("Started thread {}.", n);
                 loop {
                     let mut guard = sl.lock().unwrap();
                     let ipdomain = match guard.next() {
                         Some(a) => a,
                         None => {
-                            debug!("Thread {} finished.", n);
                             break;
                         }
                     };
@@ -126,19 +124,17 @@ impl Scanner {
                 }
                 // convert to JSON
                 let json = serde_json::to_string_pretty(&tls_info).unwrap();
-                debug!("Json: {}", &json);
-                if let Ok(a) = dbg!(out.write(&json.into_bytes())) {
-                    debug!("Bytes written :{}", a);
-                }
+                out.write(&json.into_bytes());
             }
             // close the JSON array
             out.write(b"]");
         });
 
         for (n, h) in handles.into_iter().enumerate() {
-            debug!("Thread {} finished", n);
             h.join().unwrap();
+            debug!("Thread {} finished", n);
         }
+        debug!("All producer threads finished.");
         // Make sure the guard is dropped immediately
         {
             *still_producing.lock().unwrap() = false;
@@ -154,12 +150,18 @@ impl Scanner {
         connector: SslConnector,
         timeout: Duration,
     ) -> ConnectionInfo {
-        // create tcp stream
+        // try to connect a TCP stream. Fail after a certain timeout
         let stream =
             match TcpStream::connect_timeout(&SocketAddr::new(addr.0.into(), port), timeout) {
                 Ok(s) => s,
                 Err(err) => return ConnectionInfo::from_tcp_stream_err(addr, err.to_string()),
             };
+
+        // to avoid hanging on TLS handshake, set read timeout.
+        // unwrapping is safe, because the call only returns as error if duration=0 is passed in
+        stream
+            .set_read_timeout(Some(timeout))
+            .expect("Duration cannot be 0");
 
         match connector.connect(&addr.1.to_str(), stream) {
             Ok(s) => ConnectionInfo::from_tls_info(addr, TLSConnectionInfo::from_ssl_stream(s)),
