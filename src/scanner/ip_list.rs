@@ -1,6 +1,7 @@
 use super::blocklist::Blocklist;
 use super::IpDomainPair;
 
+use log::debug;
 use std::vec::IntoIter;
 
 pub struct Scanlist {
@@ -24,6 +25,7 @@ impl Iterator for Scanlist {
     fn next(&mut self) -> Option<Self::Item> {
         let mut nxt = self.addresses.next()?;
         while self.blocklist.is_blocked_subnet(nxt.0) || self.blocklist.is_blocked_domain(&nxt.1) {
+            debug!("Blocked: {} - {}", nxt.0, nxt.1.to_str());
             nxt = self.addresses.next()?;
         }
         Some(nxt)
