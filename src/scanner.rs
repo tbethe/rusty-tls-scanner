@@ -156,7 +156,6 @@ impl Scanner {
         // wait for all the producer threads to finish
         for (n, h) in handles.into_iter().enumerate() {
             h.join().unwrap();
-            debug!("Thread {} finished", n);
         }
         debug!("All producer threads finished.");
         // Make sure the guard is dropped immediately so the producer thread
