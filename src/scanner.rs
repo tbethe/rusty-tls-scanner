@@ -252,10 +252,12 @@ impl ConnectionInfo {
 /// Serializable info about the TLS connection
 #[derive(Serialize, Deserialize, Debug)]
 struct TLSConnectionInfo {
-    handshake_status: String,
+    state: String,
+    state_long: String,
     handshake_failure_reason: Option<String>,
     tls_version: String,
-    valid_certificate_chain: String,
+    verify_result: String,
+    verify_result_err: String,
     certificate_chain: Option<CertificateChain>,
 }
 
@@ -265,10 +267,12 @@ impl TLSConnectionInfo {
         let ssl = s.ssl();
 
         TLSConnectionInfo {
-            handshake_status: "Completed".to_string(),
+            state: ssl.state_string().to_string(),
+            state_long: ssl.state_string_long().to_string(),
             handshake_failure_reason: None,
             tls_version: ssl.version_str().to_string(),
-            valid_certificate_chain: ssl.verify_result().to_string(),
+            verify_result: ssl.verify_result().to_string(),
+            verify_result_err: ssl.verify_result().error_string().to_string(),
             certificate_chain: Self::certificatechain_from_x509_stack(ssl.verified_chain()),
         }
     }
@@ -277,10 +281,12 @@ impl TLSConnectionInfo {
     fn from_midhandshake_ssl_stream(s: MidHandshakeSslStream<TcpStream>) -> Self {
         let ssl = s.ssl();
         TLSConnectionInfo {
-            handshake_status: "Failed".to_string(),
+            state: ssl.state_string().to_string(),
+            state_long: ssl.state_string_long().to_string(),
             handshake_failure_reason: Some(s.error().to_string()),
             tls_version: ssl.version_str().to_string(),
-            valid_certificate_chain: ssl.verify_result().to_string(),
+            verify_result: ssl.verify_result().to_string(),
+            verify_result_err: ssl.verify_result().error_string().to_string(),
             certificate_chain: Self::certificatechain_from_x509_stack(ssl.verified_chain()),
         }
     }
