@@ -256,9 +256,8 @@ struct TLSConnectionInfo {
     state_long: String,
     handshake_failure_reason: Option<String>,
     tls_version: String,
-    verify_result: String,
-    verify_result_err: String,
-    certificate_chain: Option<CertificateChain>,
+    valid_chain: String,
+    cert_chain: Option<CertificateChain>,
 }
 
 impl TLSConnectionInfo {
@@ -266,28 +265,43 @@ impl TLSConnectionInfo {
     fn from_ssl_stream(s: SslStream<TcpStream>) -> Self {
         let ssl = s.ssl();
 
+        // OpenSSL verify_result also returns OK if no certificate chain is presented by the peer
+        // So if there is no chain AND the result is okay, modify it to say there is no certficate.
+        let cert_chain = Self::certificatechain_from_x509_stack(ssl.peer_cert_chain());
+        let valid_chain = if cert_chain.is_none() && ssl.verify_result().to_string() == "ok" {
+            "No certificate presented".to_string()
+        } else {
+            ssl.verify_result().to_string()
+        };
         TLSConnectionInfo {
             state: ssl.state_string().to_string(),
             state_long: ssl.state_string_long().to_string(),
             handshake_failure_reason: None,
             tls_version: ssl.version_str().to_string(),
-            verify_result: ssl.verify_result().to_string(),
-            verify_result_err: ssl.verify_result().error_string().to_string(),
-            certificate_chain: Self::certificatechain_from_x509_stack(ssl.verified_chain()),
+            valid_chain,
+            cert_chain,
         }
     }
 
     /// Extracts info from the [`MidHandshakeSslStream`] to create the [`TLSConnectionInfo`].
     fn from_midhandshake_ssl_stream(s: MidHandshakeSslStream<TcpStream>) -> Self {
         let ssl = s.ssl();
+
+        // OpenSSL verify_result also returns OK if no certificate chain is presented by the peer
+        // So if there is no chain AND the result is okay, modify it to say there is no certficate.
+        let cert_chain = Self::certificatechain_from_x509_stack(ssl.peer_cert_chain());
+        let valid_chain = if cert_chain.is_none() && ssl.verify_result().to_string() == "ok" {
+            "No certificate presented".to_string()
+        } else {
+            ssl.verify_result().to_string()
+        };
         TLSConnectionInfo {
             state: ssl.state_string().to_string(),
             state_long: ssl.state_string_long().to_string(),
             handshake_failure_reason: Some(s.error().to_string()),
             tls_version: ssl.version_str().to_string(),
-            verify_result: ssl.verify_result().to_string(),
-            verify_result_err: ssl.verify_result().error_string().to_string(),
-            certificate_chain: Self::certificatechain_from_x509_stack(ssl.verified_chain()),
+            valid_chain,
+            cert_chain,
         }
     }
 
