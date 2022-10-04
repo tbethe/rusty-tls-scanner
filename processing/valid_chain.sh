@@ -1,7 +1,7 @@
 # Get domain and version pairs
 # Deduplicate (some domains might be in the input file twice, so also in the output)
 # Remove 'null' entries, i.e., where the TLS connection failed.
-versions=`cat "$1" | jq '[.[] | {"domain" : .domain, "chain": .tls_connection_info.verify_result}] | unique | .[].chain' | grep -v "null"`
+versions=`cat "$1" | jq '[.[] | {"domain" : .domain, "valid_chain": .tls_connection_info.valid_chain}] | unique | .[].valid_chain' | grep -v "null"`
 
 # number of lines
 total=`echo "$versions" | wc --lines`
