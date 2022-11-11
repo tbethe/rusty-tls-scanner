@@ -1,17 +1,17 @@
 [package]
 name = "tls-scanner-esae"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 authors = ["Timme Bethe <timme@timmebethe.nl>"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+anyhow = "1.0"
+clap = { version = "3.2", features = ["derive"] }
+env_logger = "0.9"
+log = "0.4"
+openssl = "0.10"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-log = "0.4"
-env_logger = "0.9"
-clap = { version = "3.2", features = ["derive"] }
-
-openssl = "0.10"
 

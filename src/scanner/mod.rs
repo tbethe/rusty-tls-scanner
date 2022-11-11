@@ -8,6 +8,7 @@ mod ip_list;
 pub use blocklist::Blocklist;
 pub use ip_list::Domain;
 
+use anyhow::{anyhow, Result};
 use ip_list::Scanlist;
 use log::debug;
 use openssl::ssl::{
@@ -54,15 +55,15 @@ impl Scanner {
         port: u16,
         timeout: Duration,
         threads: u64,
-    ) -> Result<Self, String> {
+    ) -> Result<Self> {
         // Build the ssl connector that will serve as a template.
         let mut conn_builder: ssl::SslConnectorBuilder =
-            ssl::SslConnector::builder(SslMethod::tls_client()).map_err(|e| e.to_string())?;
+            ssl::SslConnector::builder(SslMethod::tls_client())?;
 
         // configure rootstore to use
         conn_builder
             .set_ca_file(rootstore)
-            .map_err(|_| "Could not read the rootstore")?;
+            .map_err(|_| anyhow!("Failed to load the rootstore"))?;
 
         let template_connector = conn_builder.build();
 
@@ -79,7 +80,7 @@ impl Scanner {
     /// Starts the scan, consuming the scanner.
     ///
     /// The scan results will be written to a file indicated by `self.output_path`.
-    pub fn start_scan(self) {
+    pub fn start_scan(self) -> Result<()> {
         // scan list for all thread to pull the next ip from
         let scan_list = Arc::new(Mutex::new(self.scanlist));
         // collection channel to put the gathered tls info into
@@ -96,7 +97,9 @@ impl Scanner {
 
             handles.push(thread::spawn(move || {
                 loop {
-                    let mut guard = sl.lock().unwrap();
+                    let mut guard = sl
+                        .lock()
+                        .expect("Producer threads should not be able to panic");
                     let ipdomain = match guard.next() {
                         Some(a) => a,
                         None => {
@@ -109,7 +112,7 @@ impl Scanner {
                     let connector = con.clone();
                     let tls_info = Scanner::scan(&ipdomain, port, connector, timeout);
 
-                    res.send(tls_info);
+                    res.send(tls_info).unwrap();
                 }
             }));
         }
@@ -154,7 +157,7 @@ impl Scanner {
         });
 
         // wait for all the producer threads to finish
-        for (n, h) in handles.into_iter().enumerate() {
+        for h in handles.into_iter() {
             h.join().unwrap();
         }
         debug!("All producer threads finished.");
@@ -165,6 +168,7 @@ impl Scanner {
         }
         consumer_handle.join().unwrap();
         debug!("Scan completed.");
+        Ok(())
     }
 
     /// Performs the scan on the ip address in `IpDomainPair`
@@ -185,7 +189,7 @@ impl Scanner {
         // unwrapping is safe, because the call only returns as error if duration=0 is passed in
         stream
             .set_read_timeout(Some(timeout))
-            .expect("Duration cannot be 0");
+            .expect("Cli should have prevented the timeout from being 0");
 
         match connector.connect(&addr.1.to_string(), stream) {
             Ok(s) => ConnectionInfo::from_tls_info(addr, TLSConnectionInfo::from_ssl_stream(s)),
