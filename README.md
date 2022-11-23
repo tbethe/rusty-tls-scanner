@@ -12,9 +12,9 @@ at the University of Twente.
 
 * Cargo (installed by `rustup`) is Rust's package manager. Cargo will take care of all the rust dependencies.
 
-### How to build
+### How to build and run
 Simply run `cargo build --release` and find the binary in the `/target` directory
- or run `cargo build --release -- <arguments>`.
+ or run `cargo run --release -- <arguments>`.
 
 ## Usage
  Mandatory option:
