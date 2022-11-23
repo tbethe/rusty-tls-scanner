@@ -123,7 +123,8 @@ impl Scanner {
         let consumer_handle = thread::spawn(move || {
             let mut out = File::create(self.output_path).unwrap();
             // open the JSON array
-            out.write(b"[\n");
+            out.write_all(b"[\n")
+                .expect("IO trouble. Could not write result to output file");
             let mut first = true;
             loop {
                 let tls_info = match res_receiver.try_recv() {
@@ -144,16 +145,19 @@ impl Scanner {
 
                 // except for the first entry, prepend the comma to satisfy JSON format
                 if !first {
-                    out.write(b",\n");
+                    out.write_all(b",\n")
+                        .expect("IO trouble. Could not write result to output file");
                 } else {
                     first = false;
                 }
                 // convert to JSON
                 let json = serde_json::to_string_pretty(&tls_info).unwrap();
-                out.write(&json.into_bytes());
+                out.write_all(&json.into_bytes())
+                    .expect("IO trouble. Could not write result to output file");
             }
             // close the JSON array
-            out.write(b"]");
+            out.write_all(b"]")
+                .expect("IO trouble. Could not write result to output file");
         });
 
         // wait for all the producer threads to finish
@@ -180,7 +184,7 @@ impl Scanner {
     ) -> ConnectionInfo {
         // try to connect a TCP stream. Fail after a certain timeout
         let stream =
-            match TcpStream::connect_timeout(&SocketAddr::new(addr.0.into(), port), timeout) {
+            match TcpStream::connect_timeout(&SocketAddr::new((addr.0).into(), port), timeout) {
                 Ok(s) => s,
                 Err(err) => return ConnectionInfo::from_tcp_stream_err(addr, err.to_string()),
             };

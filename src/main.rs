@@ -61,7 +61,7 @@ fn main() -> Result<()> {
                 debug!("Could not split ip and domain on line {}: {}", line, s);
                 None
             })?;
-            let domain = Domain::try_from(domain.to_string()).ok().or_else(|| {
+            let domain = Domain::try_from(domain).ok().or_else(|| {
                 debug!("Could not parse domain on line {}: {}", line, domain);
                 None
             })?;
@@ -76,7 +76,7 @@ fn main() -> Result<()> {
     // read and parse the blocklist
     let path = PathBuf::from(&cli.block_list);
     let block_list = read_to_string(path).with_context(|| "Failed to read the blocklist")?;
-    let blocklist: Blocklist = Blocklist::new(block_list.lines().map(|s| s.to_string()).collect());
+    let blocklist: Blocklist = Blocklist::new(block_list.lines().collect::<Vec<_>>().as_slice());
 
     // check that the output file is not a directory
     let output_path = PathBuf::from(&cli.output);

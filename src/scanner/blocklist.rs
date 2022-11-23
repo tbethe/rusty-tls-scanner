@@ -25,19 +25,23 @@ impl Blocklist {
     /// Creation of the blocklist always succeeds. Bad strings (invalid IPv4 addresses or invalid
     /// domains) are simply excluded from the list. However, a debug message is sent whenever a
     /// string could not be parsed.
-    pub fn new(block_list: Vec<String>) -> Self {
+    pub fn new<'a, T>(block_list: &'a [&'a T]) -> Self
+    where
+        T: AsRef<str> + ?Sized,
+    {
         let mut domains = Vec::new();
         let mut subnets = Vec::new();
         for s in block_list {
+            let s = s.as_ref();
             if s.contains('/') {
                 // subnet
-                match Subnet::try_from(s.to_owned()) {
+                match Subnet::try_from(s) {
                     Ok(subnet) => subnets.push(subnet),
                     Err(err) => debug!("Failed to add {} during blocklist creation: {}", s, err),
                 }
             } else {
                 // domain
-                match Domain::try_from(s.to_owned()) {
+                match Domain::try_from(s) {
                     Ok(domain) => domains.push(domain),
                     // library functions shouldn't use loggers TODO
                     Err(err) => debug!("Failed to add {} during blocklist creation: {}", s, err),
@@ -48,7 +52,7 @@ impl Blocklist {
     }
 
     /// Checks if `ip` is blocked by this blocklist.
-    pub fn is_blocked_subnet(&self, ip: Ipv4Addr) -> bool {
+    pub fn is_blocked_subnet(&self, ip: &Ipv4Addr) -> bool {
         for subnet in &self.subnets {
             if subnet.ip_in_subnet(ip) {
                 return true;
@@ -80,16 +84,16 @@ struct Subnet {
 impl Subnet {
     /// Checks if `ip` is in the subnet that `Self` represents.
     /// Returns `true` if `ip` belongs to `Self`s subnet, `false` otherwise.
-    fn ip_in_subnet(&self, ip: Ipv4Addr) -> bool {
-        let _ip: u32 = ip.into();
+    fn ip_in_subnet(&self, ip: &Ipv4Addr) -> bool {
+        let _ip: u32 = u32::from(*ip);
         _ip & self.mask == self.ip & self.mask
     }
 }
 
-impl TryFrom<String> for Subnet {
+impl<'a> TryFrom<&'a str> for Subnet {
     type Error = &'static str;
 
-    fn try_from(string: String) -> Result<Self, Self::Error> {
+    fn try_from(string: &str) -> Result<Self, Self::Error> {
         let (ip, subnet) = string
             .split_once('/')
             .ok_or("Invalid subnet notation: No '/' found")?;
@@ -148,35 +152,28 @@ mod tests {
                 "213.239.192.0/18",
                 "buscharter.com.au",
             ];
-            let list = list.into_iter().map(|s| s.to_owned()).collect();
-            Blocklist::new(list)
+            Blocklist::new(list.as_slice())
         }
 
         #[test]
         fn test_subnet_in_blocklist() {
             let bl = create_blocklist();
-            assert!(bl.is_blocked_subnet(Ipv4Addr::from_str("186.193.238.86").unwrap()));
-            assert!(bl.is_blocked_subnet(Ipv4Addr::from_str("213.239.200.0").unwrap()));
-            assert!(bl.is_blocked_subnet(Ipv4Addr::from_str("208.81.245.241").unwrap()));
-            assert!(bl.is_blocked_subnet(Ipv4Addr::from_str("127.0.0.1").unwrap()));
+            assert!(bl.is_blocked_subnet(&Ipv4Addr::from_str("186.193.238.86").unwrap()));
+            assert!(bl.is_blocked_subnet(&Ipv4Addr::from_str("213.239.200.0").unwrap()));
+            assert!(bl.is_blocked_subnet(&Ipv4Addr::from_str("208.81.245.241").unwrap()));
+            assert!(bl.is_blocked_subnet(&Ipv4Addr::from_str("127.0.0.1").unwrap()));
 
-            assert!(!bl.is_blocked_subnet(Ipv4Addr::from_str("186.193.238.85").unwrap()));
-            assert!(!bl.is_blocked_subnet(Ipv4Addr::from_str("126.120.120.123").unwrap()));
+            assert!(!bl.is_blocked_subnet(&Ipv4Addr::from_str("186.193.238.85").unwrap()));
+            assert!(!bl.is_blocked_subnet(&Ipv4Addr::from_str("126.120.120.123").unwrap()));
         }
 
         #[test]
         fn test_domain_in_blocklist() {
             let bl = create_blocklist();
-            assert!(
-                bl.is_blocked_domain(&Domain::try_from("buscharter.com.au".to_owned()).unwrap())
-            );
-            assert!(
-                bl.is_blocked_domain(&Domain::try_from("boshandmurphy.com".to_owned()).unwrap())
-            );
-            assert!(bl.is_blocked_domain(&Domain::try_from("psamathe.net".to_owned()).unwrap()));
-            assert!(
-                bl.is_blocked_domain(&Domain::try_from("audioengineering.com".to_owned()).unwrap())
-            );
+            assert!(bl.is_blocked_domain(&Domain::try_from("buscharter.com.au").unwrap()));
+            assert!(bl.is_blocked_domain(&Domain::try_from("boshandmurphy.com").unwrap()));
+            assert!(bl.is_blocked_domain(&Domain::try_from("psamathe.net").unwrap()));
+            assert!(bl.is_blocked_domain(&Domain::try_from("audioengineering.com").unwrap()));
         }
     }
     mod subnet {
@@ -187,47 +184,45 @@ mod tests {
         fn test_ip_in_subnet(subnet: &str, ip: &str) -> bool {
             // can panic, but if it panics here, the test is written wrong.
             let ip = Ipv4Addr::from_str(ip).unwrap();
-            Subnet::try_from(subnet.to_owned())
-                .unwrap()
-                .ip_in_subnet(ip)
+            Subnet::try_from(subnet).unwrap().ip_in_subnet(&ip)
         }
 
         #[test]
         fn valid() {
-            Subnet::try_from("1.1.1.1/24".to_owned()).unwrap();
+            Subnet::try_from("1.1.1.1/24").unwrap();
         }
 
         #[test]
         fn valid_32_subnet() {
-            Subnet::try_from("1.1.1.1/32".to_owned()).unwrap();
+            Subnet::try_from("1.1.1.1/32").unwrap();
         }
 
         #[test]
         fn valid_0_subnet() {
-            Subnet::try_from("192.168.192.4/0".to_owned()).unwrap();
+            Subnet::try_from("192.168.192.4/0").unwrap();
         }
         #[test]
         #[should_panic]
         fn invalid_subnet() {
-            Subnet::try_from("1.1.1.1/50".to_owned()).unwrap();
+            Subnet::try_from("1.1.1.1/50").unwrap();
         }
 
         #[test]
         #[should_panic]
         fn invalid_ip() {
-            Subnet::try_from("500.1.1.1/23".to_owned()).unwrap();
+            Subnet::try_from("500.1.1.1/23").unwrap();
         }
 
         #[test]
         #[should_panic]
         fn invalid_ip2() {
-            Subnet::try_from("500.as.1.1/23".to_owned()).unwrap();
+            Subnet::try_from("500.as.1.1/23").unwrap();
         }
 
         #[test]
         #[should_panic]
         fn invalid_ip3() {
-            Subnet::try_from("example.com/16".to_owned()).unwrap();
+            Subnet::try_from("example.com/16").unwrap();
         }
 
         #[test]
