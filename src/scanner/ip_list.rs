@@ -5,6 +5,7 @@ use super::blocklist::Blocklist;
 use super::IpDomainPair;
 
 use log::debug;
+use std::fmt::Display;
 use std::vec::IntoIter;
 
 /// Scan list. Combination of a list of [`IpDomainPair`]s and a blocklist, implementing an Iterator
@@ -57,10 +58,11 @@ impl Domain {
         }
         true
     }
+}
 
-    /// Convert the domain to a String. Could be implemented with the Trait, but I was lazy.
-    pub fn to_string(&self) -> String {
-        self.inner.join(".")
+impl Display for Domain {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.pad(&self.inner.join("."))
     }
 }
 
