@@ -26,6 +26,7 @@
 //! Run with `--help` to see all options.
 
 mod cli;
+mod ratelimiter;
 mod scanner;
 
 use anyhow::{bail, Context, Result};
@@ -36,6 +37,8 @@ use std::{fs::read_to_string, net::Ipv4Addr, path::PathBuf, str::FromStr, time::
 
 use scanner::Blocklist;
 use scanner::Domain;
+
+use crate::scanner::ScannerOpts;
 
 /// Main function that creates the commandline interface and constructs
 /// and runs the scanner.
@@ -88,14 +91,18 @@ fn main() -> Result<()> {
 
     // finally construct the scanner
     debug!("Constructing the scanner.");
+    let scanner_options = ScannerOpts::new(
+        cli.port,
+        Duration::from_secs(cli.timeout),
+        cli.threads,
+        Duration::from_millis(cli.rate),
+    );
     let scanner = scanner::Scanner::new(
         addresses,
         blocklist,
         output_path,
         rootstore_path,
-        cli.port,
-        Duration::from_secs(cli.timeout),
-        cli.threads,
+        scanner_options,
     )
     .with_context(|| "Could not construct the scanner")?;
     info!("Starting the scan.");

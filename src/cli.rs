@@ -34,10 +34,16 @@ pub struct Cli {
     pub root_store: String,
 
     /// Timeout for each connection in seconds.
-    #[clap(short, long, value_parser, default_value_t = 10)]
+    #[clap(long, value_parser, default_value_t = 10)]
     pub timeout: u64,
 
     /// Number of threads to use to perform the scan.
     #[clap(long, value_parser, default_value_t = 1)]
     pub threads: u64,
+
+    /// Rate the scanner should scan at in milliseconds.
+    /// A rate of 100ms means it start a new connection at most once every 100ms.
+    /// Rate of 0 means go as fast as you can.
+    #[clap(long, value_parser, default_value_t = 1_000)]
+    pub rate: u64,
 }

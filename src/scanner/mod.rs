@@ -8,6 +8,8 @@ mod ip_list;
 pub use blocklist::Blocklist;
 pub use ip_list::Domain;
 
+use crate::ratelimiter::RateLimit;
+
 use anyhow::{anyhow, Result};
 use ip_list::Scanlist;
 use log::debug;
@@ -24,6 +26,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
+use tqdm::Iter;
 
 /// Abstraction over a pair of an IPv4 address and a domain,
 /// just like we expect a line of the input file to look like.
@@ -37,9 +40,26 @@ pub struct Scanner {
     /// template for all the TLS connections that the this scanner will create.
     template_connector: SslConnector,
     output_path: PathBuf,
+    options: ScannerOpts,
+}
+
+/// Scanner options
+pub struct ScannerOpts {
     destination_port: u16,
     timeout: Duration,
     threads: u64,
+    rate: Duration,
+}
+
+impl ScannerOpts {
+    pub fn new(destination_port: u16, timeout: Duration, threads: u64, rate: Duration) -> Self {
+        ScannerOpts {
+            destination_port,
+            timeout,
+            threads,
+            rate,
+        }
+    }
 }
 
 impl Scanner {
@@ -52,9 +72,7 @@ impl Scanner {
         blocklist: blocklist::Blocklist,
         output_path: PathBuf,
         rootstore: PathBuf,
-        port: u16,
-        timeout: Duration,
-        threads: u64,
+        options: ScannerOpts,
     ) -> Result<Self> {
         // Build the ssl connector that will serve as a template.
         let mut conn_builder: ssl::SslConnectorBuilder =
@@ -71,9 +89,7 @@ impl Scanner {
             scanlist: Scanlist::new(addresses, blocklist),
             template_connector,
             output_path,
-            destination_port: port,
-            timeout,
-            threads,
+            options,
         })
     }
 
@@ -82,15 +98,18 @@ impl Scanner {
     /// The scan results will be written to a file indicated by `self.output_path`.
     pub fn start_scan(self) -> Result<()> {
         // scan list for all thread to pull the next ip from
-        let scan_list = Arc::new(Mutex::new(self.scanlist));
+        let scan_list = Arc::new(Mutex::new(
+            self.scanlist.rate_limited(self.options.rate).tqdm(),
+        ));
+
         // collection channel to put the gathered tls info into
         let (res_sender, res_receiver) = std::sync::mpsc::channel();
 
         // spawn the producers, a.k.a. the threads that will perform the scans.
         let mut handles = Vec::new();
-        for _ in 0..self.threads {
-            let timeout = self.timeout;
-            let port = self.destination_port;
+        for _ in 0..self.options.threads {
+            let timeout = self.options.timeout;
+            let port = self.options.destination_port;
             let sl = Arc::clone(&scan_list);
             let res = res_sender.clone();
             let con = self.template_connector.clone();
