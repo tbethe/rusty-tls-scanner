@@ -8,7 +8,7 @@ at the University of Twente.
 ### Dependecies
 
 * Rust toolchain (recommended to install via `rustup`).
-* OpenSSL
+* OpenSSL, see https://docs.rs/openssl/latest/openssl/#automatic for instructions.
 
 * Cargo (installed by `rustup`) is Rust's package manager. Cargo will take care of all the rust dependencies.
 
