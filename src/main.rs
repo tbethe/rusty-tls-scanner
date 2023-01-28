@@ -55,7 +55,7 @@ fn main() -> Result<()> {
     // read and parse ip addresses to be scanned
     let path = PathBuf::from(&cli.ip_list);
     let ip_list = read_to_string(path).with_context(|| "Could not read ip_list")?;
-    let addresses: Vec<_> = ip_list
+    let addresses = ip_list
         .lines()
         .enumerate()
         .filter_map(|(l, s)| {

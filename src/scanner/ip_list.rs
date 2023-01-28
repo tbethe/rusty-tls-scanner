@@ -5,8 +5,9 @@ use super::blocklist::Blocklist;
 use super::IpDomainPair;
 
 use log::debug;
+use std::collections::hash_set::IntoIter;
+use std::collections::HashSet;
 use std::fmt::Display;
-use std::vec::IntoIter;
 
 /// Scan list. Combination of a list of [`IpDomainPair`]s and a blocklist, implementing an Iterator
 /// such that only non-blocked pairs are returned.
@@ -18,7 +19,7 @@ pub struct Scanlist {
 
 impl Scanlist {
     /// Constructs a new scan list from a blocklist and [`IpDomainPair`]s.
-    pub fn new(addresses: Vec<IpDomainPair>, blocklist: Blocklist) -> Self {
+    pub fn new(addresses: HashSet<IpDomainPair>, blocklist: Blocklist) -> Self {
         Scanlist {
             blocklist,
             addresses: addresses.into_iter(),
@@ -39,7 +40,7 @@ impl Iterator for Scanlist {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Hash)]
 pub struct Domain {
     inner: Vec<String>,
 }

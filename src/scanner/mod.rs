@@ -19,6 +19,7 @@ use openssl::ssl::{
 use openssl::stack::StackRef;
 use openssl::x509::{X509Ref, X509};
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::fs::File;
 use std::io::Write;
 use std::net::{Ipv4Addr, SocketAddr, TcpStream};
@@ -30,7 +31,7 @@ use tqdm::Iter;
 
 /// Abstraction over a pair of an IPv4 address and a domain,
 /// just like we expect a line of the input file to look like.
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq, Hash)]
 pub struct IpDomainPair(pub Ipv4Addr, pub Domain);
 
 /// TLS Scanner that actually performs the scan.
@@ -68,7 +69,7 @@ impl Scanner {
     /// # Error
     /// Returns `Err(String)` if something went wrong loading the x509 root store.
     pub fn new(
-        addresses: Vec<IpDomainPair>,
+        addresses: HashSet<IpDomainPair>,
         blocklist: blocklist::Blocklist,
         output_path: PathBuf,
         rootstore: PathBuf,
@@ -116,9 +117,7 @@ impl Scanner {
 
             handles.push(thread::spawn(move || {
                 loop {
-                    let mut guard = sl
-                        .lock()
-                        .expect("Producer threads should not be able to panic");
+                    let mut guard = sl.lock().expect("Producer threads should not panic");
                     let ipdomain = match guard.next() {
                         Some(a) => a,
                         None => {
@@ -205,7 +204,17 @@ impl Scanner {
         let stream =
             match TcpStream::connect_timeout(&SocketAddr::new((addr.0).into(), port), timeout) {
                 Ok(s) => s,
-                Err(err) => return ConnectionInfo::from_tcp_stream_err(addr, err.to_string()),
+                // Is it offline, or only serving HTTP?
+                Err(err) => {
+                    let conn_status = match TcpStream::connect_timeout(
+                        &SocketAddr::new((addr.0).into(), 80),
+                        timeout,
+                    ) {
+                        Ok(_) => ConnectionStatus::Fail443Ok80,
+                        Err(_) => ConnectionStatus::Fail,
+                    };
+                    return ConnectionInfo::from_tcp_stream_err(addr, err.to_string(), conn_status);
+                }
             };
 
         // to avoid hanging on TLS handshake, set read timeout.
@@ -217,9 +226,11 @@ impl Scanner {
         match connector.connect(&addr.1.to_string(), stream) {
             Ok(s) => ConnectionInfo::from_tls_info(addr, TLSConnectionInfo::from_ssl_stream(s)),
             Err(err) => match err {
-                HandshakeError::SetupFailure(err_stack) => {
-                    ConnectionInfo::from_tcp_stream_err(addr, err_stack.to_string())
-                }
+                HandshakeError::SetupFailure(err_stack) => ConnectionInfo::from_tcp_stream_err(
+                    addr,
+                    err_stack.to_string(),
+                    ConnectionStatus::Ok443,
+                ),
                 HandshakeError::Failure(midhandshake) => ConnectionInfo::from_tls_info(
                     addr,
                     TLSConnectionInfo::from_midhandshake_ssl_stream(midhandshake),
@@ -237,12 +248,23 @@ impl Scanner {
 // Objects to facilitate serializing the TLS info
 //
 
+/// Was the connection to the server established?
+#[derive(Serialize, Deserialize, Debug)]
+enum ConnectionStatus {
+    /// Server was reachable on port 443
+    Ok443,
+    /// Server was unreachable on port 443, but it was reachable on port 80
+    Fail443Ok80,
+    /// Server was unreachable on both port 433 and port 80
+    Fail,
+}
+
 /// Struct that represents the result of scanning 1 ip/domain.
 #[derive(Serialize, Deserialize, Debug)]
 struct ConnectionInfo {
     domain: String,
     ip_address: String,
-    connection_failure: bool,
+    connection_status: ConnectionStatus,
     connection_failure_reason: Option<String>,
     tls_connection_info: Option<TLSConnectionInfo>,
 }
@@ -250,13 +272,17 @@ struct ConnectionInfo {
 impl ConnectionInfo {
     /// Creates a `ConnectionInfo` from when the TCP stream errored, most likely
     /// because of a connection timeout
-    fn from_tcp_stream_err(ipdomain: &IpDomainPair, reason: String) -> Self {
+    fn from_tcp_stream_err(
+        ipdomain: &IpDomainPair,
+        reason: String,
+        status: ConnectionStatus,
+    ) -> Self {
         let domain = ipdomain.1.to_string();
         let ip_address = ipdomain.0.to_string();
         ConnectionInfo {
             domain,
             ip_address,
-            connection_failure: true,
+            connection_status: status,
             connection_failure_reason: Some(reason),
             tls_connection_info: None,
         }
@@ -269,7 +295,7 @@ impl ConnectionInfo {
         ConnectionInfo {
             domain,
             ip_address,
-            connection_failure: false,
+            connection_status: ConnectionStatus::Ok443,
             connection_failure_reason: None,
             tls_connection_info: Some(tls_info),
         }
@@ -284,6 +310,7 @@ struct TLSConnectionInfo {
     handshake_failure_reason: Option<String>,
     tls_version: String,
     valid_chain: String,
+    #[serde(skip)]
     cert_chain: Option<CertificateChain>,
 }
 
