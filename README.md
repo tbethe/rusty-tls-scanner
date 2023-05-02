@@ -5,9 +5,9 @@ TLS Scanner written in Rust, originally created for the course Empirical Securit
 at the University of Twente. It then turned into a project I extend to learn.
 
 ## Building
-### Dependecies
+### Dependencies
 
-* Rust toolchain (recommended to install via `rustup`).
+* Rust (recommended to install via `rustup`).
 * OpenSSL, see https://docs.rs/openssl/latest/openssl/#automatic for instructions.
 
 ## Usage
